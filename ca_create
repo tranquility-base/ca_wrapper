@@ -1,0 +1,349 @@
+#!/bin/sh
+## Portions of this script adapted from the excellent
+##   jamielinux.com/docs/openssl-certificate-authority/index.html
+## 2018-05-04 Created. Dwight
+
+
+usage() {
+	echo "Usage: `basename $0` [-f HOST_FQDN]  \\"
+	echo "           -b BASE_DIR -n CA_NAME  \\"
+	echo "           -c COUNTRY -s STATE -l LOCALITY -o ORGANIZATION  \\"
+	echo "           [-u OU] [-e EMAIL]   \\"
+	echo "           [-v OCSP_HOST]"
+	echo "  If -f given, create an intermediate CA with HOST_FQDN in the CN field of csr."
+	echo "  Otherwise create a root CA."
+	echo "  Options -csloue are for fields in the CA's certificate."
+	echo "  No trailing slash on BASE_DIR."
+	echo "  No spaces in CA_NAME."
+	echo "  Examples:"
+	echo "    `basename $0` -f ca.example.com   \\"           
+	echo "        -b /opt/ca -n example-intermediate-ca   \\"
+	echo "        -c US -s \"New York\" -l Buffalo -o \"Example Industries, Inc.\"   \\"
+	echo "        -u \"IT Department\" -e pki-manager@example.com   \\"
+	echo "        -v ocsp.example.com"
+	echo "    `basename $0`   \\"
+	echo "        -b /opt/ca -n example-root-ca   \\"
+	echo "        -c US -s \"New York\" -l Buffalo -o \"Example Industries, Inc.\"   \\"
+	echo "        -u \"IT Department\"   \\"
+	echo "        -v ocsp.example.com"
+}
+
+# Defaults
+HOST_FQDN=""     	# Empty ? Create Root CA : create intermediate CA
+BASE_DIR=""
+CA_NAME=""		# Name for CA dir, and key, cert, cls pem files.
+# Default values for fields in certs
+COUNTRY=""
+STATE=""
+LOCALITY=""
+ORGANIZATION=""
+OU=""
+EMAIL=""
+OCSP_HOST=""
+
+while getopts ":f:b:n:c:s:l:o:u:e:v:" opt; do
+	case ${opt} in
+	    f )
+		HOST_FQDN=$OPTARG
+		;;
+	    b )
+		BASE_DIR=$OPTARG
+		;;
+	    n )
+		CA_NAME=$OPTARG
+		;;
+	    c )
+		COUNTRY=$OPTARG
+		;;
+	    s )
+		STATE=$OPTARG
+		;;
+	    l )
+		LOCALITY=$OPTARG
+		;;
+	    o )
+		ORGANIZATION=$OPTARG
+		;;
+	    u )
+		OU=$OPTARG
+		;;
+	    e )
+		EMAIL=$OPTARG
+		;;
+	    v )
+		OCSP_HOST=$OPTARG
+		;;
+	    * )
+		echo "Unrecognized option $OPTARG"
+		usage
+		exit 1
+		;;
+	esac
+done
+
+: << DEBUG
+	echo "##### DEBUG #####"
+	echo "HOST_FQDN:    $HOST_FQDN"
+	echo "BASE_DIR:     $BASE_DIR"
+	echo "CA_NAME:      $CA_NAME"
+	echo "COUNTRY:      $COUNTRY"
+	echo "STATE:        $STATE"
+	echo "LOCALITY:     $LOCALITY"
+	echo "ORGANIZATION: $ORGANIZATION"
+	echo "OU:           $OU"
+	echo "EMAIL:        $EMAIL"
+	echo "OCSP_HOST:    $OCSP_HOST"
+	echo "##### DEBUG #####"
+DEBUG
+
+## Do we have all required options (bncslo)?
+if  [ -z "$BASE_DIR" ] || [ -z "$CA_NAME" ] || [ -z "$COUNTRY" ] \
+		|| [ -z "$STATE" ] || [ -z "$LOCALITY" ]         \
+		|| [ -z "$ORGANIZATION" ]; then
+	echo ">>>>>"
+	echo ">>>>> ERROR: Missing a required option (one of -bncslo)."
+	echo ">>>>>"
+	usage
+	exit 1
+fi
+
+## Set up path and other variables
+CA_DIR=$BASE_DIR/$CA_NAME
+TIMESTAMP=`date +%Y%m%d-%H%M`
+KEY_FILENAME="$CA_NAME-key-$TIMESTAMP.pem"
+CERT_FILENAME="$CA_NAME-cert-$TIMESTAMP.pem"
+CSR_FILENAME="$CA_NAME-$TIMESTAMP.csr"
+# Starting serial numbers must have an even number of digits.
+CA_SERIAL_START=`openssl rand -hex 8`
+
+## Prepare the directory
+mkdir -p $CA_DIR || exit 1
+mkdir -p $CA_DIR/private || exit 1
+chmod 700 $CA_DIR/private || exit 1
+mkdir -p $CA_DIR/certs || exit 1
+mkdir -p $CA_DIR/crl || exit 1
+mkdir -p $CA_DIR/csr || exit 1
+mkdir -p $CA_DIR/newcerts || exit 1
+touch $CA_DIR/index.txt  || exit 1
+echo $CA_SERIAL_START > $CA_DIR/serial
+
+# Settings where root and intermediate CAs differ. Assume root, fix if need be.
+# The Root CA's (self-signed) cert is valid for 20 years (7300 days), the 
+# Intermediate certs it signs should be valid for 10 years (3650 days) and 
+# certs signed by the Intermediate CA should be valid for 3 years (1100 days is
+# close enough).
+IS_ROOT_CA=1
+CA_POLICY="policy_strict"
+CERT_DAYS="3650"
+CN=$CA_NAME
+if [ -n "$HOST_FQDN" ] ; then 
+	IS_ROOT_CA=""
+	CA_POLICY="policy_loose"
+	CERT_DAYS="1100"
+	CN=$HOST_FQDN
+	echo $CRL_SERIAL_START > $CA_DIR/crlnumber
+fi
+
+## Create the openssl.cnf config file. We use a massive heredoc. For details
+## on heredocs, see http://tldp.org/LDP/abs/html/here-docs.html. One note:
+## the "-" in "<<-" causes leading tabs to be stripped. Nice.
+
+## If OCSP_HOST is null or undefined, set OCSP_LINE to null. Otherwise,
+## set OCSP_LINE to OCSP_HOST, with additional text.
+OCSP_LINE=${OCSP_HOST:+authorityInfoAccess = OCSP;URI:http://$OCSP_HOST}
+(
+cat <<-EOF
+	# OpenSSL CA configuration file.
+	
+	[ ca ]
+	default_ca = CA_default
+	
+	[ CA_default ]
+	# Directory and file locations.
+	dir               = $CA_DIR
+	certs             = \$dir/certs
+	crl_dir           = \$dir/crl
+	new_certs_dir     = \$dir/newcerts
+	database          = \$dir/index.txt
+	serial            = \$dir/serial
+	RANDFILE          = \$dir/private/.rand
+	
+	# The root key and root certificate.
+	private_key       = \$dir/private/$KEY_FILENAME
+	certificate       = \$dir/certs/$CERT_FILENAME
+	
+	# For certificate revocation lists.
+	crlnumber         = \$dir/crlnumber
+	crl               = \$dir/crl/$CRL_FILENAME
+	crl_extensions    = crl_ext
+	default_crl_days  = 30
+	
+	# More defaults
+	default_md        = sha256
+	name_opt          = ca_default
+	cert_opt          = ca_default
+	default_days      = $CERT_DAYS
+	preserve          = no
+	policy            = $CA_POLICY
+	
+	[ policy_strict ]
+	# The root CA should only sign intermediate certificates that match.
+	# See the POLICY FORMAT section of 'man ca'.
+	countryName             = match
+	stateOrProvinceName     = match
+	organizationName        = match
+	organizationalUnitName  = optional
+	commonName              = supplied
+	emailAddress            = optional
+	
+	[ policy_loose ]
+	# Allow the intermediate CA to sign a more diverse range of certificates.
+	# See the POLICY FORMAT section of 'man ca'.
+	countryName             = optional
+	stateOrProvinceName     = optional
+	localityName            = optional
+	organizationName        = optional
+	organizationalUnitName  = optional
+	commonName              = supplied
+	emailAddress            = optional
+	
+	[ req ]
+	# Options for the 'req' tool (man req).
+	default_bits        = 2048
+	distinguished_name  = req_distinguished_name
+	string_mask         = utf8only
+	default_md          = sha256
+	
+	# Extension to add when the -x509 option is used.
+	x509_extensions     = v3_ca
+	
+	[ req_distinguished_name ]
+	# See <https://en.wikipedia.org/wiki/Certificate_signing_request>.
+	countryName                     = Country Name (2 letter code)
+	stateOrProvinceName             = State or Province Name
+	localityName                    = Locality Name
+	0.organizationName              = Organization Name
+	organizationalUnitName          = Organizational Unit Name
+	commonName                      = Common Name
+	emailAddress                    = Email Address
+	
+	# Optionally, specify some defaults.
+	countryName_default             = $COUNTRY
+	stateOrProvinceName_default     = $STATE
+	localityName_default            = $LOCALITY
+	0.organizationName_default      = $ORGANIZATION
+	organizationalUnitName_default  = $OU
+	emailAddress_default            = $EMAIL
+	
+	[ v3_ca ]
+	# Extensions for a typical CA (man x509v3_config).
+	subjectKeyIdentifier = hash
+	authorityKeyIdentifier = keyid:always,issuer
+	basicConstraints = critical, CA:true
+	keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+	
+	[ v3_intermediate_ca ]
+	# Extensions for a typical intermediate CA (man x509v3_config).
+	subjectKeyIdentifier = hash
+	authorityKeyIdentifier = keyid:always,issuer
+	basicConstraints = critical, CA:true, pathlen:0
+	keyUsage = critical, digitalSignature, cRLSign, keyCertSign
+	
+	[ usr_cert ]
+	# Extensions for client certificates (man x509v3_config).
+	basicConstraints = CA:FALSE
+	nsCertType = client, email
+	nsComment = "OpenSSL Generated Client Certificate from $CA_NAME"
+	subjectKeyIdentifier = hash
+	authorityKeyIdentifier = keyid,issuer
+	keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment
+	extendedKeyUsage = clientAuth, emailProtection
+	
+	[ server_cert ]
+	# Extensions for server certificates (man x509v3_config).
+	basicConstraints = CA:FALSE
+	nsCertType = server
+	nsComment = "OpenSSL Generated Server Certificate from $CA_NAME"
+	subjectKeyIdentifier = hash
+	authorityKeyIdentifier = keyid,issuer:always
+	keyUsage = critical, digitalSignature, keyEncipherment
+	extendedKeyUsage = serverAuth
+	$OCSP_LINE
+	
+	## [ crl_ext ]
+	## # Extension for CRLs (man x509v3_config).
+	## authorityKeyIdentifier=keyid:always
+	
+	[ ocsp ]
+	# Extension for OCSP signing certificates (man ocsp).
+	basicConstraints = CA:FALSE
+	subjectKeyIdentifier = hash
+	authorityKeyIdentifier = keyid,issuer
+	keyUsage = critical, digitalSignature
+	extendedKeyUsage = critical, OCSPSigning
+	
+EOF
+) > $CA_DIR/openssl.cnf
+
+## Create the CA key
+echo ">> "
+echo ">> About to create the CA's private key. The passphrase you enter"
+echo ">> should be extremely strong, and a permanent record should be stored"
+echo ">> in a highly secure place. If lost, the passphrase and secret key "
+echo ">>            >>>>> CANNOT BE RECOVERED <<<<<"
+echo ">>"
+echo -n ">> I understand. Let's do it (hit ENTER)."
+read NULL
+openssl genrsa -aes256 -out $CA_DIR/private/$KEY_FILENAME 4096
+chmod 400 $CA_DIR/private/$KEY_FILENAME
+
+## Create the CA certificate if we are a root CA
+if [ $IS_ROOT_CA ] ; then
+	echo ">> "
+	echo ">> About to create the Root CA's certificate. When prompted for"
+	echo ">> a passphrase, use the one you just entered for the private key."
+	openssl req 					\
+		-config $CA_DIR/openssl.cnf		\
+		-key $CA_DIR/private/$KEY_FILENAME	\
+		-new					\
+		-x509					\
+		-days $CERT_DAYS			\
+		-sha256					\
+		-extensions v3_ca			\
+		-out $CA_DIR/certs/$CERT_FILENAME	\
+		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/EMAIL=$EMAIL/CN=$CN"
+	chmod 444 $CA_DIR/certs/$CERT_FILENAME
+else
+	echo ">> "
+	echo ">> About to create a CSR for the Intermediate CA's certificate."
+	echo ">> When prompted for a passphrase, use the one you entered for"
+	echo ">> the private key."
+	openssl req					\
+		-config $CA_DIR/openssl.cnf		\
+		-key $CA_DIR/private/$KEY_FILENAME	\
+		-new					\
+		-sha256					\
+		-out $CA_DIR/csr/$CSR_FILENAME		\
+		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/EMAIL=$EMAIL/CN=$CN"
+	chmod 444 $CA_DIR/csr/$CSR_FILENAME
+fi
+
+echo ">> "
+echo ">> Certificate authority $CA_NAME instantiated in $CA_DIR."
+echo ">> "
+if [ $IS_ROOT_CA ] ; then
+	echo ">> This is a Root CA, ready to operate. Best practice is to keep it "
+	echo ">> offline and bring it up only to sign Intermediate CA's CSRs. The "
+	echo ">> key passphrase MUST be kept in a secure location,  and ONLY in a "
+	echo ">> secure location, when not in use.  It is prudent to perform "
+	echo ">> integrity checks on the Root CA machine prior to each use, and "
+	echo ">> also prudent to burn a copy of the key onto write-once media "
+	echo ">> and store it in a secure location."
+else
+	echo ">> This an Intermediate CA. Before it can operate, a Root CA"
+	echo ">> must sign the csr ($CA_DIR/csr/$CSR_FILENAME)."
+	echo ">> The signed certificate should be named $CERT_FILENAME,"
+	echo ">> be placed in $CA_DIR/certs, and have permissions 444".
+	echo ">> Take care to secure the machine hosting the CA, and store a copy of"
+	echo ">> the key and passphrase on write-once media in a secure location."
+fi
