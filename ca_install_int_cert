@@ -1,0 +1,128 @@
+#!/bin/sh
+## Given an intermediate CA certificate signed by a higher CA, and
+## the chain file of that CA, install the cert in the intermediate
+## CA and create its chain file.
+
+usage() {
+	echo "Usage: `basename $0` intermediate_ca cert_file chain_file"
+	echo "  Installs certificate in the CA and creates its chain file."
+	echo "  'intermediate_ca' is the path to a CA created with ca_create."
+	echo "  'cert_file' is a cert for the intermediate-ca signed by a"
+	echo "    higher-level CA."
+	echo "  The cert_file and chain_file names MUST end in '.pem'"
+	echo "  The cert_file should have a timestamp or other unique "
+	echo "    identifying string in its name."
+	echo "  Chain_file must be that of the CA that signed the cert_file."
+	echo "  The chain_file and the cert_file are used to create a new "
+	echo "    chain file for the intermediate CA."
+	echo "  Example"
+	echo "    `basename $0` /opt/ca/example-inter1 \\ "
+	echo "        example-inter1-20180101.pem \\ "
+	echo "        example-root-chain.pem"
+}
+
+if [ -z $3 ] || [ ! -z $4 ] ; then
+	usage
+	exit 1
+fi
+
+CA_DIR=$1
+CA_CERT=$2
+CHAIN_FILE=$3
+CERT_DIR="${CA_DIR}/certs"
+CA_NAME=`basename $CA_DIR`
+CA_CERT_BASENAME=`basename $CA_CERT`
+CA_CERT_LINKNAME="${CA_NAME}-cert.pem"
+TIMESTAMP=`date +%Y%m%d-%H%M`
+MY_CHAIN_FILENAME="${CA_NAME}-chain-$TIMESTAMP.pem"
+MY_CHAIN_LINKNAME="${CA_NAME}-chain.pem"
+
+## Check for '.pem' suffixes.
+if [ $CA_CERT = ${CA_CERT%.pem} ] ; then
+	echo ">> FATAL: $CACERT does not have a '.pem' suffix)."
+	usage
+	exit 1
+fi
+if [ $CHAIN_FILE = ${CHAIN_FILE%.pem} ] ; then
+	echo ">> FATAL: $CHAIN_FILE does not have a '.pem' suffix."
+	usage
+	exit 1
+fi
+
+## Check that CERT_DIR exists and is writable.
+if [ ! -d ${CERT_DIR} ] || [ ! -w ${CERT_DIR} ] ; then
+	echo ">> FATAL: $CERT_DIR does not exists or is not writeable."
+	usage
+	exit 1
+fi
+
+## Check that CA_CERT file exists and is readable
+if [ ! -r $CA_CERT ] ; then
+	echo ">> FATAL: $CA_CERT does not exist or is not readable."
+	exit 1
+fi
+
+## Check that CHAIN_FILE file exists and is readable
+if [ ! -r $CHAIN_FILE ] ; then
+	echo ">> FATAL: $CHAIN_FILE does not exist or is not readable."
+	exit 1
+fi
+
+## Check that the cert is not already installed.
+if [ -e ${CERT_DIR}/${CA_CERT_BASENAME} ] ; then
+	echo ">> FATAL: certificate is already installed."
+	exit 1
+fi
+
+## Looks good. Install the cert.
+cp $CA_CERT ${CERT_DIR}/${CA_CERT_BASENAME}
+if [ ! $? ] ; then
+	echo ">> FATAL: could not copy $CA_CERT to ${CERT_DIR}/${CA_CERT_BASENAME}."
+	exit 1
+fi
+
+## Create standard-named symlink to the cert.
+# Parentheses are essential preserving working directory. They create a
+# subshell so the 'cd' is local to code inside parentheses. We do this 
+# to create a relative link.
+( cd $CERT_DIR ; ln -sf $CA_CERT_BASENAME $CA_CERT_LINKNAME )
+if [ ! $? ] ; then
+	echo ">> FATAL: Could not create link from $CA_CERT_LINKNAME to $CA_CERT_BASENAME."
+	echo ">>        To clean up, remove $CA_CERT_BASENAME from $CERT_DIR."
+fi
+echo ">> $CA_CERT installed."
+
+
+## Create and install the new chain file.
+cat $CHAIN_FILE $CA_CERT > ${CERT_DIR}/${MY_CHAIN_FILENAME}
+if [ ! $? ] ; then
+	echo ">> FATAL: Could not create chain file (${CERT_DIR}/${MY_CHAIN_FILENAME}) for this CA."
+	echo ">>       However, a cert file (${CERT_DIR}/${CA_CERT_BASENAME}) was created"
+	echo ">>       along with a link (${CERT_DIR}/${CA_CERT_LINKNAME}) pointing to it."
+	echo ">>       You may need to remove these for troubleshooting."
+	exit 1
+fi
+
+## Create standard-named symlink to new chain file.
+# Parentheses essential, see comment above on this.
+( cd $CERT_DIR ; ln -sf $MY_CHAIN_FILENAME $MY_CHAIN_LINKNAME )
+if [ ! $? ] ; then 
+	echo ">> FATAL: Could not create link from $MY_CHAIN_LINKNAME to $MY_CHAIN_FILENAME."
+	echo ">>        To clean up, remove these files from ${CERT_DIR}:"
+	echo ">>            $CA_CERT_BASENAME, "
+	echo ">>            $CA_CERT_LINKNAME, and " 
+	echo ">>            $MY_CHAIN_FILENAME"
+	exit 1
+fi
+echo ">> $MY_CHAIN_FILENAME (chain file for this CA) installed. This chain "
+echo ">>   INCLUDES the certificate(s) from $CHAIN_FILE."
+
+
+cp ${CERT_DIR}/${MY_CHAIN_LINKNAME} ./${MY_CHAIN_LINKNAME}
+if [ $? ] ; then
+	echo ">> A copy, named ${MY_CHAIN_LINKNAME}, is in the current directory."
+else
+	echo ">> I tried but could not place a copy of this CA's new chain ile"
+	echo ">> in the current directory, but you can copy it manually. It's at"
+	echo ">>     ${CERT_DIR}/${MY_CHAIN_LINKNAME}."
+fi

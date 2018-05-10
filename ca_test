@@ -1,13 +1,17 @@
 #!/bin/sh
 
-rm -rf ca
+CA_PATH=./ca
+SCRIPT_PATH=~/workspace/ssl/ca_wrapper
+
+rm -rf $CA_PATH
 rm -f example-root*
-rm -f example-int1*
+rm -f example-int*
+
 
 # Root
 echo "CREATE ROOT CA"
-./ca_create \
-	-b ca \
+$SCRIPT_PATH/ca_create \
+	-b $CA_PATH \
 	-n example-root \
 	-c US \
 	-s "New York" \
@@ -19,9 +23,10 @@ echo "CREATE ROOT CA"
 
 # Intermediate
 echo "CREATE INTERMEDIATE CA BELOW ROOT CA"
-./ca_create -f example-int1.example.edu \
-	-b ca \ 
-	-n example-int1 \ 
+$SCRIPT_PATH/ca_create \
+	-f example-int1.example.edu \
+	-b $CA_PATH \
+	-n example-int1 \
 	-c US \
 	-s "New York" \
 	-l Exampleton \
@@ -32,5 +37,25 @@ echo "CREATE INTERMEDIATE CA BELOW ROOT CA"
 
 # Sign
 echo "SIGN INTERMEDIATE CA'S CSR"
-./ca_signcsr -i ca/example-root example-int1-cert*.csr
+$SCRIPT_PATH/ca_signcsr -i $CA_PATH/example-root example-int1-cert*.csr
 
+# Install
+echo "INSTALL SIGNED CERT AND NEW CHAIN"
+$SCRIPT_PATH/ca_install_int_cert $CA_PATH/example-int1 example-int1-cert*.pem example-root-chain.pem
+
+# 2nd Intermediate
+echo "CREATE 2nd INTERMEDIATE CA"
+$SCRIPT_PATH/ca_create \
+	-f example-int2.example.edu \
+	-b $CA_PATH \
+	-n example-int2 \
+	-c US \
+	-s "New York" \
+	-l Exampleton \
+	-o "Example Industries Inc." \
+	-u "IT Department" \
+	-v ocsp.example.com
+echo "SIGN 2nd INTERMEDIATE CSR"
+$SCRIPT_PATH/ca_signcsr -i $CA_PATH/example-int1 example-int2-cert*.csr
+echo "INSTALL CERT and NEW CHAIN IN 2nd INTERMEDIATE"
+$SCRIPT_PATH/ca_install_int_cert $CA_PATH/example-int2 example-int2-cert*.pem example-int1-chain.pem

@@ -150,17 +150,17 @@ echo $CA_SERIAL_START > $CA_DIR/serial
 IS_ROOT_CA=1
 CA_POLICY="policy_strict"
 CERT_DAYS=$INTERMEDIATE_CERT_LIFETIME
-CN=$CA_NAME
+CN="$CA_NAME, $ORGANIZATION, $LOCALITY"
 CA_TYPE="ROOT"
 if [ -n "$HOST_FQDN" ] ; then 
 	IS_ROOT_CA=""
 	CA_POLICY="policy_loose"
 	CERT_DAYS=$LEAF_CERT_LIFETIME
 	CN=$HOST_FQDN
-	echo $CRL_SERIAL_START > $CA_DIR/crlnumber
+	# echo $CRL_SERIAL_START > $CA_DIR/crlnumber
 	CA_TYPE="INTERMEDIATE"
 fi
-touch "$CA_DIR/this_ca_type_is_$CA_TYPE"
+touch "$CA_DIR/this_ca_is_$CA_TYPE"
 echo ">>"
 echo ">> Creating a CA of type $CA_TYPE"
 echo ">>"
@@ -275,7 +275,7 @@ cat <<-EOF
 	# Extensions for client certificates (man x509v3_config).
 	basicConstraints = CA:FALSE
 	nsCertType = client, email
-	nsComment = "OpenSSL Generated Client Certificate from $CA_NAME"
+	nsComment = "OpenSSL-generated client certificate from $CN"
 	subjectKeyIdentifier = hash
 	authorityKeyIdentifier = keyid,issuer
 	keyUsage = critical, nonRepudiation, digitalSignature, keyEncipherment
@@ -285,7 +285,7 @@ cat <<-EOF
 	# Extensions for server certificates (man x509v3_config).
 	basicConstraints = CA:FALSE
 	nsCertType = server
-	nsComment = "OpenSSL Generated Server Certificate from $CA_NAME"
+	nsComment = "OpenSSL-generated server certificate from $CN"
 	subjectKeyIdentifier = hash
 	authorityKeyIdentifier = keyid,issuer:always
 	keyUsage = critical, digitalSignature, keyEncipherment
@@ -314,7 +314,7 @@ echo ">> should be extremely strong, and a permanent record should be stored"
 echo ">> in a highly secure place. If lost, the passphrase and secret key "
 echo ">>            >>>>> CANNOT BE RECOVERED <<<<<"
 echo ">>"
-echo -n ">> I understand. Let's do it (hit ENTER) "
+echo -n ">> I understand. Let's do it (hit ENTER to begin) "
 read NULL	# Wait for ENTER
 
 openssl genrsa -aes256 -out $CA_DIR/private/$KEY_FILENAME 4096
@@ -330,7 +330,7 @@ chmod 400 $CA_DIR/private/$KEY_FILENAME
 # to create a relative link.
 ( cd $CA_DIR/private/ ; ln -sf $KEY_FILENAME $KEY_LINKNAME )
 
-## Create the CA certificate if we are a root CA
+## Create the CA certificate
 if [ $IS_ROOT_CA ] ; then
 	echo ">> "
 	echo ">> About to create the Root CA's certificate. When prompted for"
@@ -395,18 +395,20 @@ if [ $IS_ROOT_CA ] ; then
 	echo ">> prudent to burn a copy of the key (in $CA_DIR/private)"
 	echo ">> and passphrase on write-once media and store it in a secure location."
 else
-	echo ">> This an Intermediate CA. Before it can operate, a higher-level CA"
-	echo ">>   must sign the csr ($CA_DIR/csr/$CSR_FILENAME)."
+	echo ">> This is an Intermediate CA. Before it can operate, a higher-level CA"
+	echo ">>   must sign the csr ($CSR_FILENAME) and provide a chain file."
 	echo ">>   A copy of this csr has been placed in the current directory."
-	echo ">> The signed certificate should be named $CERT_FILENAME,"
-	echo ">>   be placed in $CA_DIR/certs and have permissions 444."
-	echo ">>   Make the link $CA_DIR/certs/$CERT_LINKNAME point to it."
-	echo ">> The signing CA should also provide a chain certificate. Name it"
-	echo ">>   $CHAIN_FILENAME, place it in $CA_DIR/certs and"
-	echo ">>   make the link $CA_DIR/certs/$CHAIN_LINKNAME point to it."
-	echo ">>   This file encodes the chain of trust from the signing CA up "
-	echo ">>   through all intermediate CAs to the root CA."
-	echo ">> Take care to secure the machine hosting the CA, and store a copy of"
-	echo ">>   the key (in $CA_DIR/private) and passphrase on write-once"
-	echo ">>   media in a secure location."
+	echo ">>"
+	echo ">> To get the signed cert and chain file and install them here:"
+	echo ">> 1) Copy $CSR_FILENAME to the machine with the higher-level CA. "
+	echo ">> 2) On that machine run"
+	echo ">>        ca_signcsr higher-level-ca_dir $CSR_FILENAME"
+	echo ">>    to get a signed cert ($CERT_FILENAME) and chain file."
+	echo ">> 3) Copy $CERT_FILENAME and the chain file back to this machine."
+	echo ">> 4) On this machine run"
+	echo ">>      ca_install_int_cert $CA_DIR $CERT_FILENAME higher_CA_chain_file"
+	echo ">>"
+	echo ">> Take care to secure this machine, and store a copy of the key"
+	echo ">>   (in $CA_DIR/private) and passphrase on write-once media and keep"
+	echo ">>   the media in a secure location."
 fi

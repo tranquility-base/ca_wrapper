@@ -3,13 +3,14 @@
 ## 2018-05-04 Started. Dwight Tuinstra.
 
 usage() {
-	echo "Usage: `basename $0` [-i|-s|-u] ca-directory path-to-csr"
+	echo "Usage: `basename $0` [-i|-s|-u] ca-directory csr_file"
 	echo "    -i : sign an intermediate CA certificate"
 	echo "    -s : sign a server certificate (default)"
 	echo "    -u : sign a user/client certificate"
 	echo "  Last occurrence of -s, -u, or -i is used."
 	echo "  Causes the CA at ca-directory to sign the csr."
 	echo "  The csr filename MUST end in '.csr'"
+	echo "  The signed cert is placed in the current directory."
 	echo "  Verifying csr info prior to signing is the responsibility of "
 	echo "    the person running this script.  An opportunity to do this "
 	echo "    is presented during the running of this utility."
@@ -87,8 +88,6 @@ fi
 
 ## Does the $CSR_FILE have ".csr" for an extension? Try stripping it off.
 BASE_FILENAME=${CSR_FILE%.csr}
-# echo "BASE_FILENAME: $BASE_FILENAME"     # Debug
-
 if [ $BASE_FILENAME = $CSR_FILE ] ; then
 	## stripping off ".csr" failed
 	echo ">>>>> ERROR: csr filename does not end in '.csr'"
@@ -98,10 +97,8 @@ if [ $BASE_FILENAME = $CSR_FILE ] ; then
 fi
 
 ## All OK, sign the cert
-
 CERT_FILE="`basename ${BASE_FILENAME}`.pem"
-# echo "CERT_FILE:     $CERT_FILE"     # Debug
-rm -f "$CERT_FILE"
+rm -f "$CERT_FILE"	# Clear any previously-created file of that name.
 
 openssl ca 			\
 	-config $CFG_PATH	\
@@ -109,16 +106,21 @@ openssl ca 			\
 	-notext 		\
 	-in $CSR_FILE 		\
 	-out $CERT_FILE
-if [ $? != "0" ] ; then
+if [ ! $? ] ; then
 	echo ">> FATAL: 'openssl ca' failed. Wong passphrase?"
 	exit 1
 fi
 # echo ">>>>> DEBUG. openssl ca exit status is $?."
+echo ">> Signed certificate is in the current directory, named "
+echo ">>     $CERT_FILE."
 
 ## Give user a copy of my chain
 cp -f $CHAIN_PATH .
+if [ ! $? ] ; then
+	echo ">> OOPS: Could not copy chain file into current directory."
+	echo ">>       But you can copy it yourself from $CHAIN_PATH."
+else
+	echo ">> A copy of the signing CA's chain file is in the current directory, named "
+	echo ">>     `basename ${CHAIN_PATH}`."
+fi
 
-echo ">> Signed certificate is in the current directory, named "
-echo ">>   $CERT_FILE."
-echo ">> A copy of the signing CA's chain file is in the current directory, named "
-echo ">>   `basename ${CHAIN_PATH}`."
