@@ -1,18 +1,36 @@
 #!/bin/sh
 
 rm -rf ca
-rm -f potsdam-root*
-rm -f potsdam-int1*
+rm -f example-root*
+rm -f example-int1*
 
 # Root
 echo "CREATE ROOT CA"
-./ca_create -b ca -n potsdam-root -c US -s "New York" -l Potsdam -o "SUNY College at Potsdam" -u CTS -e helpdesk@potsdam.edu -v ocsp.potsdam.edu
+./ca_create \
+	-b ca \
+	-n example-root \
+	-c US \
+	-s "New York" \
+	-l Exampleton \
+	-o "Example Industries Inc." \
+	-u "IT Department" \
+	-e certmonger@example.com \
+	-v ocsp.example.com
 
 # Intermediate
-echo "CREATE INTERMEDIATE CA"
-./ca_create -f potsdam-int1.potsdam.edu -b ca -n potsdam-int1 -c US -s "New York" -l Potsdam -o "SUNY College at Potsdam" -u CTS -e helpdesk@potsdam.edu -v ocsp.potsdam.edu
+echo "CREATE INTERMEDIATE CA BELOW ROOT CA"
+./ca_create -f example-int1.example.edu \
+	-b ca \ 
+	-n example-int1 \ 
+	-c US \
+	-s "New York" \
+	-l Exampleton \
+	-o "Example Industries Inc." \
+	-u "IT Department" \
+	-e certmonger@example.com \
+	-v ocsp.example.com
 
 # Sign
 echo "SIGN INTERMEDIATE CA'S CSR"
-./ca_signcsr -i ca/potsdam-root potsdam-int1-cert*.csr
+./ca_signcsr -i ca/example-root example-int1-cert*.csr
 
