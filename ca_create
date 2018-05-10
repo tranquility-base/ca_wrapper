@@ -1,18 +1,18 @@
 #!/bin/sh
 ## Portions of this script adapted from the excellent
 ##   jamielinux.com/docs/openssl-certificate-authority/index.html
-## 2018-05-04 Created. Dwight
+## 2018-05-04 Dwight Tuinstra. Created.
+## 2018-05-09 Dwight Tuinstra. Make suitable for general use. Add conventions used with ca_signcsr.
 
 
 usage() {
 	echo "Usage: `basename $0` [-f HOST_FQDN]  \\"
 	echo "           -b BASE_DIR -n CA_NAME  \\"
-	echo "           -c COUNTRY -s STATE -l LOCALITY -o ORGANIZATION  \\"
-	echo "           [-u OU] [-e EMAIL]   \\"
+	echo "           -c COUNTRY -s STATE -l LOCALITY -o ORGANIZATION [-u OU] [-e EMAIL]  \\"
 	echo "           [-v OCSP_HOST]"
 	echo "  If -f given, create an intermediate CA with HOST_FQDN in the CN field of csr."
 	echo "  Otherwise create a root CA."
-	echo "  Options -csloue are for fields in the CA's certificate."
+	echo "  Options -csloue are for fields in the CA's certificate, and defaults for csrs it signs."
 	echo "  No trailing slash on BASE_DIR."
 	echo "  No spaces in CA_NAME."
 	echo "  Examples:"
@@ -81,6 +81,7 @@ while getopts ":f:b:n:c:s:l:o:u:e:v:" opt; do
 	esac
 done
 
+# Comment out first and last lines of this block to activate debug printing.
 : << DEBUG
 	echo "##### DEBUG #####"
 	echo "HOST_FQDN:    $HOST_FQDN"
@@ -100,9 +101,6 @@ DEBUG
 if  [ -z "$BASE_DIR" ] || [ -z "$CA_NAME" ] || [ -z "$COUNTRY" ] \
 		|| [ -z "$STATE" ] || [ -z "$LOCALITY" ]         \
 		|| [ -z "$ORGANIZATION" ]; then
-	echo ">>>>>"
-	echo ">>>>> ERROR: Missing a required option (one of -bncslo)."
-	echo ">>>>>"
 	usage
 	exit 1
 fi
@@ -112,16 +110,30 @@ CA_DIR=$BASE_DIR/$CA_NAME
 TIMESTAMP=`date +%Y%m%d-%H%M`
 KEY_FILENAME="$CA_NAME-key-$TIMESTAMP.pem"
 CERT_FILENAME="$CA_NAME-cert-$TIMESTAMP.pem"
-CSR_FILENAME="$CA_NAME-$TIMESTAMP.csr"
+CSR_FILENAME="$CA_NAME-cert-$TIMESTAMP.csr"
+# Chain file is what we give to requestors when we sign their CSR. It's our
+# cert appended to the the certs of CAs above us. If we're the Root CA, its
+# just our (self-signed) cert.
+CHAIN_FILENAME="$CA_NAME-chain-$TIMESTAMP.pem"
+# Links point to most recent versions of key, cert, csr, chain. This provides a
+# uniform name for other code that accesses these files.
+KEY_LINKNAME="$CA_NAME-key.pem"
+CERT_LINKNAME="$CA_NAME-cert.pem"
+CSR_LINKNAME="$CA_NAME-cert.csr"
+CHAIN_LINKNAME="$CA_NAME-chain.pem"
 # Starting serial numbers must have an even number of digits.
 CA_SERIAL_START=`openssl rand -hex 8`
+# Cert lifetimes (in days). "Leaf" certs are server and user/client certs.
+ROOT_CERT_LIFETIME=7350			# 20 years plus some
+INTERMEDIATE_CERT_LIFETIME=3660		# 10 years plus some
+LEAF_CERT_LIFETIME=1100			#  3 years plus some
 
 ## Prepare the directory
 mkdir -p $CA_DIR || exit 1
 mkdir -p $CA_DIR/private || exit 1
 chmod 700 $CA_DIR/private || exit 1
 mkdir -p $CA_DIR/certs || exit 1
-mkdir -p $CA_DIR/crl || exit 1
+#mkdir -p $CA_DIR/crl || exit 1
 mkdir -p $CA_DIR/csr || exit 1
 mkdir -p $CA_DIR/newcerts || exit 1
 touch $CA_DIR/index.txt  || exit 1
@@ -134,15 +146,21 @@ echo $CA_SERIAL_START > $CA_DIR/serial
 # close enough).
 IS_ROOT_CA=1
 CA_POLICY="policy_strict"
-CERT_DAYS="3650"
+CERT_DAYS=$INTERMEDIATE_CERT_LIFETIME
 CN=$CA_NAME
+CA_TYPE="ROOT"
 if [ -n "$HOST_FQDN" ] ; then 
 	IS_ROOT_CA=""
 	CA_POLICY="policy_loose"
-	CERT_DAYS="1100"
+	CERT_DAYS=$LEAF_CERT_LIFETIME
 	CN=$HOST_FQDN
 	echo $CRL_SERIAL_START > $CA_DIR/crlnumber
+	CA_TYPE="INTERMEDIATE"
 fi
+touch "$CA_DIR/this_ca_type_is_$CA_TYPE"
+echo ">>"
+echo ">> Creating a CA of type $CA_TYPE"
+echo ">>"
 
 ## Create the openssl.cnf config file. We use a massive heredoc. For details
 ## on heredocs, see http://tldp.org/LDP/abs/html/here-docs.html. One note:
@@ -162,21 +180,22 @@ cat <<-EOF
 	# Directory and file locations.
 	dir               = $CA_DIR
 	certs             = \$dir/certs
-	crl_dir           = \$dir/crl
+	#crl_dir           = \$dir/crl
 	new_certs_dir     = \$dir/newcerts
 	database          = \$dir/index.txt
 	serial            = \$dir/serial
 	RANDFILE          = \$dir/private/.rand
 	
 	# The root key and root certificate.
-	private_key       = \$dir/private/$KEY_FILENAME
-	certificate       = \$dir/certs/$CERT_FILENAME
+	private_key       = \$dir/private/$KEY_LINKNAME
+	certificate       = \$dir/certs/$CERT_LINKNAME
 	
+	## Use OCSP instead.
 	# For certificate revocation lists.
-	crlnumber         = \$dir/crlnumber
-	crl               = \$dir/crl/$CRL_FILENAME
-	crl_extensions    = crl_ext
-	default_crl_days  = 30
+	#crlnumber         = \$dir/crlnumber
+	#crl               = \$dir/crl/\$CRL_FILENAME
+	#crl_extensions    = crl_ext
+	#default_crl_days  = 30
 	
 	# More defaults
 	default_md        = sha256
@@ -292,10 +311,21 @@ echo ">> should be extremely strong, and a permanent record should be stored"
 echo ">> in a highly secure place. If lost, the passphrase and secret key "
 echo ">>            >>>>> CANNOT BE RECOVERED <<<<<"
 echo ">>"
-echo -n ">> I understand. Let's do it (hit ENTER)."
-read NULL
+echo -n ">> I understand. Let's do it (hit ENTER) "
+read NULL	# Wait for ENTER
+
 openssl genrsa -aes256 -out $CA_DIR/private/$KEY_FILENAME 4096
+if [ $? != "0" ] ; then
+	echo ">> FATAL: 'openssl genrsa' failed. Passphrase mismatch?"
+	exit 1
+fi
+# echo ">>>>> DEBUG. openssl genrsa exit status is $?."
+
 chmod 400 $CA_DIR/private/$KEY_FILENAME
+# Parentheses are essential preserving working directory. They create a
+# subshell so the 'cd' is local to code inside parentheses. We do this 
+# to create a relative link.
+( cd $CA_DIR/private/ ; ln -sf $KEY_FILENAME $KEY_LINKNAME )
 
 ## Create the CA certificate if we are a root CA
 if [ $IS_ROOT_CA ] ; then
@@ -307,12 +337,24 @@ if [ $IS_ROOT_CA ] ; then
 		-key $CA_DIR/private/$KEY_FILENAME	\
 		-new					\
 		-x509					\
-		-days $CERT_DAYS			\
+		-days $ROOT_CERT_LIFETIME		\
 		-sha256					\
 		-extensions v3_ca			\
 		-out $CA_DIR/certs/$CERT_FILENAME	\
 		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/EMAIL=$EMAIL/CN=$CN"
+	if [ $? != "0" ] ; then
+		echo ">> FATAL: 'openssl req' failed. Wrong passphrase?"
+		exit 1
+	fi
+	#echo ">>>>> DEBUG. openssl req exit status is $?."
+
 	chmod 444 $CA_DIR/certs/$CERT_FILENAME
+	# Parentheses essential. See comment for $KEY_LINKNAME above.
+	(	cd $CA_DIR/certs/
+		ln -sf $CERT_FILENAME $CERT_LINKNAME
+		ln -sf $CERT_FILENAME $CHAIN_FILENAME
+		ln -sf $CHAIN_FILENAME $CHAIN_LINKNAME
+	)
 else
 	echo ">> "
 	echo ">> About to create a CSR for the Intermediate CA's certificate."
@@ -325,7 +367,17 @@ else
 		-sha256					\
 		-out $CA_DIR/csr/$CSR_FILENAME		\
 		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/EMAIL=$EMAIL/CN=$CN"
+	if [ $? != "0" ] ; then
+		echo ">> FATAL: 'openssl req' failed. Wrong passphrase?"
+		exit 1
+	fi
+	#echo ">>>>> DEBUG. openssl req exit status is $?."
+
 	chmod 444 $CA_DIR/csr/$CSR_FILENAME
+	# Parentheses essential. See comment for $KEY_LINKNAME above.
+	( cd $CA_DIR/csr/ ; ln -sf $CSR_FILENAME $CSR_LINKNAME )
+	# Give user a copy of the csr.
+	cp -f $CA_DIR/csr/$CSR_FILENAME .
 fi
 
 echo ">> "
@@ -337,13 +389,21 @@ if [ $IS_ROOT_CA ] ; then
 	echo ">> key passphrase MUST be kept in a secure location,  and ONLY in a "
 	echo ">> secure location, when not in use.  It is prudent to perform "
 	echo ">> integrity checks on the Root CA machine prior to each use, and "
-	echo ">> also prudent to burn a copy of the key onto write-once media "
-	echo ">> and store it in a secure location."
+	echo ">> prudent to burn a copy of the key (in $CA_DIR/private)"
+	echo ">> and passphrase on write-once media and store it in a secure location."
 else
-	echo ">> This an Intermediate CA. Before it can operate, a Root CA"
-	echo ">> must sign the csr ($CA_DIR/csr/$CSR_FILENAME)."
+	echo ">> This an Intermediate CA. Before it can operate, a higher-level CA"
+	echo ">>   must sign the csr ($CA_DIR/csr/$CSR_FILENAME)."
+	echo ">>   A copy of this csr has been placed in the current directory."
 	echo ">> The signed certificate should be named $CERT_FILENAME,"
-	echo ">> be placed in $CA_DIR/certs, and have permissions 444".
+	echo ">>   be placed in $CA_DIR/certs and have permissions 444."
+	echo ">>   Make the link $CA_DIR/certs/$CERT_LINKNAME point to it."
+	echo ">> The signing CA should also provide a chain certificate. Name it"
+	echo ">>   $CHAIN_FILENAME, place it in $CA_DIR/certs and"
+	echo ">>   make the link $CA_DIR/certs/$CHAIN_LINKNAME point to it."
+	echo ">>   This file encodes the chain of trust from the signing CA up "
+	echo ">>   through all intermediate CAs to the root CA."
 	echo ">> Take care to secure the machine hosting the CA, and store a copy of"
-	echo ">> the key and passphrase on write-once media in a secure location."
+	echo ">>   the key (in $CA_DIR/private) and passphrase on write-once"
+	echo ">>   media in a secure location."
 fi

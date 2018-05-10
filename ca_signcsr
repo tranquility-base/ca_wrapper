@@ -1,0 +1,124 @@
+#!/bin/sh
+## Have a CA sign a CSR, and supply a chain file.
+## 2018-05-04 Started. Dwight Tuinstra.
+
+usage() {
+	echo "Usage: `basename $0` [-i|-s|-u] ca-directory path-to-csr"
+	echo "    -i : sign an intermediate CA certificate"
+	echo "    -s : sign a server certificate (default)"
+	echo "    -u : sign a user/client certificate"
+	echo "  Last occurrence of -s, -u, or -i is used."
+	echo "  Causes the CA at ca-directory to sign the csr."
+	echo "  The csr filename MUST end in '.csr'"
+	echo "  Verifying csr info prior to signing is the responsibility of "
+	echo "    the person running this script.  An opportunity to do this "
+	echo "    is presented during the running of this utility."
+}
+
+while getopts ":sui" opt; do
+	case ${opt} in
+	    s ) ## server_cert
+		CERT_TYPE=server_cert
+		;;
+	    u )	## usr_cert
+		CERT_TYPE=usr_cert
+		;;
+	    i)  ## intermediate CA cert
+		CERT_TYPE=v3_intermediate_ca
+		;;
+	    * )
+		echo "Unrecognized option $OPTARG"
+		usage
+		exit 1
+		;;
+	esac
+done
+## If we didn't get a -s, -u or -i.
+CERT_TYPE=${CERT_TYPE:-server_cert}
+shift `expr $OPTIND - 1`
+
+if [ -z "$1" ] || [ -z "$2" ] || [ ! -z "$3" ] ; then
+	usage
+	exit 1
+fi
+
+CA_DIR=$1
+CSR_FILE=$2
+
+CA_NAME=`basename $CA_DIR`
+CHAIN_PATH=${CA_DIR}/certs/${CA_NAME}-chain.pem
+CFG_PATH=${CA_DIR}/openssl.cnf
+
+: << DEBUG
+	echo "CA_DIR:        $CA_DIR"
+	echo "CSR_FILE:      $CSR_FILE"
+	echo "CA_NAME:       $CA_NAME"
+	echo "CHAIN_PATH:    $CHAIN_PATH"
+	echo "CFG_PATH:      $CFG_PATH"
+DEBUG
+
+## Is there really a CA at CA_DIR?
+if [ ! -d $CA_DIR ] ; then
+	echo ">>>>> ERROR: directory '$CA_DIR' does not exist."
+	usage
+	exit 1
+fi
+if [ ! -e $CFG_PATH ] || [ ! -r $CFG_PATH ] ; then
+	echo ">>>>> ERROR: no $CFG_PATH found. Is there a CA at '$CA_DIR'?"
+	usage
+	exit 1
+fi
+
+## Does it have a chain cert?
+if [ ! -e $CHAIN_PATH ] || [ ! -r $CHAIN_PATH ] ; then
+	echo ">>>> ERROR: Chain cert ($CHAIN_PATH) does not exist or cannot be read."
+	echo ">>>>        CA does not adhere to ca_wrapper conventions."
+	echo ">>>>        Cowardly refusing to continue."
+	usage
+	exit 1
+fi
+
+## Is there readable file at CSR_FILE?
+if [ ! -e $CSR_FILE ] || [ ! -r $CSR_FILE ] ; then
+	echo ">>>>> ERROR: $CSR_FILE does not exist or cannot be read."
+	usage
+	exit 1
+fi
+
+## Does the $CSR_FILE have ".csr" for an extension? Try stripping it off.
+BASE_FILENAME=${CSR_FILE%.csr}
+# echo "BASE_FILENAME: $BASE_FILENAME"     # Debug
+
+if [ $BASE_FILENAME = $CSR_FILE ] ; then
+	## stripping off ".csr" failed
+	echo ">>>>> ERROR: csr filename does not end in '.csr'"
+	echo ">>>>>        Cowardly refusing to ignore ca_wrapper naming conventions."
+	usage
+	exit 1
+fi
+
+## All OK, sign the cert
+
+CERT_FILE="`basename ${BASE_FILENAME}`.pem"
+# echo "CERT_FILE:     $CERT_FILE"     # Debug
+rm -f "$CERT_FILE"
+
+openssl ca 			\
+	-config $CFG_PATH	\
+	-extensions $CERT_TYPE	\
+	-notext 		\
+	-in $CSR_FILE 		\
+	-out $CERT_FILE
+if [ $? != "0" ] ; then
+	echo ">> FATAL: 'openssl ca' failed. Wong passphrase?"
+	exit 1
+fi
+# echo ">>>>> DEBUG. openssl ca exit status is $?."
+
+## Give user a copy of my chain
+cp -f $CHAIN_PATH .
+
+echo ">> Signed certificate is in the current directory, named "
+echo ">>   $CERT_FILE."
+echo ">> A copy of the signing CA's chain file is in the current directory, named "
+echo ">>   `basename ${CHAIN_PATH}`."
