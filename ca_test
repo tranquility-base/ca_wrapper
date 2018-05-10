@@ -1,0 +1,18 @@
+#!/bin/sh
+
+rm -rf ca
+rm -f potsdam-root*
+rm -f potsdam-int1*
+
+# Root
+echo "CREATE ROOT CA"
+./ca_create -b ca -n potsdam-root -c US -s "New York" -l Potsdam -o "SUNY College at Potsdam" -u CTS -e helpdesk@potsdam.edu -v ocsp.potsdam.edu
+
+# Intermediate
+echo "CREATE INTERMEDIATE CA"
+./ca_create -f potsdam-int1.potsdam.edu -b ca -n potsdam-int1 -c US -s "New York" -l Potsdam -o "SUNY College at Potsdam" -u CTS -e helpdesk@potsdam.edu -v ocsp.potsdam.edu
+
+# Sign
+echo "SIGN INTERMEDIATE CA'S CSR"
+./ca_signcsr -i ca/potsdam-root potsdam-int1-cert*.csr
+
