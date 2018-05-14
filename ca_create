@@ -4,6 +4,8 @@
 ## 2018-05-04 Dwight Tuinstra. Created.
 ## 2018-05-09 Dwight Tuinstra. Make suitable for general use. Add conventions used with ca_signcsr.
 
+# Undefined or empty string turns debug printing off, all else turns it on.
+DEBUG=""
 
 usage() {
 	echo "Usage: `basename $0` [-f HOST_FQDN]  \\"
@@ -84,21 +86,20 @@ while getopts ":f:b:n:c:s:l:o:u:e:v:" opt; do
 	esac
 done
 
-# Comment out first and last lines of this block to activate debug printing.
-: << DEBUG
-	echo "##### DEBUG #####"
-	echo "HOST_FQDN:    $HOST_FQDN"
-	echo "BASE_DIR:     $BASE_DIR"
-	echo "CA_NAME:      $CA_NAME"
-	echo "COUNTRY:      $COUNTRY"
-	echo "STATE:        $STATE"
-	echo "LOCALITY:     $LOCALITY"
-	echo "ORGANIZATION: $ORGANIZATION"
-	echo "OU:           $OU"
-	echo "EMAIL:        $EMAIL"
-	echo "OCSP_HOST:    $OCSP_HOST"
-	echo "##### DEBUG #####"
-DEBUG
+if [ -n "$DEBUG" ] ; then
+	echo ">>>>> ##### DEBUG #####"
+	echo ">>>>> HOST_FQDN:    $HOST_FQDN"
+	echo ">>>>> BASE_DIR:     $BASE_DIR"
+	echo ">>>>> CA_NAME:      $CA_NAME"
+	echo ">>>>> COUNTRY:      $COUNTRY"
+	echo ">>>>> STATE:        $STATE"
+	echo ">>>>> LOCALITY:     $LOCALITY"
+	echo ">>>>> ORGANIZATION: $ORGANIZATION"
+	echo ">>>>> OU:           $OU"
+	echo ">>>>> EMAIL:        $EMAIL"
+	echo ">>>>> OCSP_HOST:    $OCSP_HOST"
+	echo ">>>>> ##### DEBUG #####"
+fi
 
 ## Do we have all required options (bncslo)?
 if  [ -z "$BASE_DIR" ] || [ -z "$CA_NAME" ] || [ -z "$COUNTRY" ] \
@@ -236,8 +237,11 @@ cat <<-EOF
 	string_mask         = utf8only
 	default_md          = sha256
 	
-	# Extension to add when the -x509 option is used.
+	# Extension to add when the -x509 option is used (used for self-signed certs, see
+	#   http://openssl.6102.n7.nabble.com/cmd-line-and-subjectAltName-tp47538p47552.html)
 	x509_extensions     = v3_ca
+	# Extension to add when creating CSRs
+	req_extensions      = v3_ca
 	
 	[ req_distinguished_name ]
 	# See <https://en.wikipedia.org/wiki/Certificate_signing_request>.
@@ -322,7 +326,7 @@ if [ $? != "0" ] ; then
 	echo ">> FATAL: 'openssl genrsa' failed. Passphrase mismatch?"
 	exit 1
 fi
-# echo ">>>>> DEBUG. openssl genrsa exit status is $?."
+if [ -n "$DEBUG" ] ; then echo ">>>>> DEBUG. openssl genrsa exit status is $?." ; fi
 
 chmod 400 $CA_DIR/private/$KEY_FILENAME
 # Parentheses are essential preserving working directory. They create a
@@ -349,7 +353,7 @@ if [ $IS_ROOT_CA ] ; then
 		echo ">> FATAL: 'openssl req' failed. Wrong passphrase?"
 		exit 1
 	fi
-	#echo ">>>>> DEBUG. openssl req exit status is $?."
+	if [ -n "$DEBUG" ] ; then echo ">>>>> DEBUG. openssl req exit status is $?." ; fi
 
 	chmod 444 $CA_DIR/certs/$CERT_FILENAME
 	# Parentheses essential. See comment for $KEY_LINKNAME above.
@@ -374,7 +378,7 @@ else
 		echo ">> FATAL: 'openssl req' failed. Wrong passphrase?"
 		exit 1
 	fi
-	#echo ">>>>> DEBUG. openssl req exit status is $?."
+	if [ -n "$DEBUG" ] ; then ">>>>> DEBUG. openssl req exit status is $?." ; fi
 
 	chmod 444 $CA_DIR/csr/$CSR_FILENAME
 	# Parentheses essential. See comment for $KEY_LINKNAME above.
