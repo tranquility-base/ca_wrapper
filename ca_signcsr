@@ -97,7 +97,7 @@ if [ $BASE_FILENAME = $CSR_FILE ] ; then
 fi
 
 ## All OK, sign the cert
-CERT_FILE="`basename ${BASE_FILENAME}`.pem"
+CERT_FILE="`basename ${BASE_FILENAME}`-crt.pem"
 rm -f "$CERT_FILE"	# Clear any previously-created file of that name.
 
 openssl ca 			\
