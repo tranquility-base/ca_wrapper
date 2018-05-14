@@ -15,7 +15,6 @@ usage() {
 	echo "  If -f given, create an intermediate CA with HOST_FQDN in the CN field of csr."
 	echo "  Otherwise create a root CA."
 	echo "  Options -csloue are for fields in the CA's certificate, and defaults for csrs it signs."
-	echo "  No trailing slash on BASE_DIR."
 	echo "  No spaces in CA_NAME."
 	echo "  CA is created in BASE_DIR/CA_NAME."
 	echo "  Examples"
@@ -51,7 +50,7 @@ while getopts ":f:b:n:c:s:l:o:u:e:v:" opt; do
 	    f )
 		HOST_FQDN=$OPTARG
 		;;
-	    b )
+	    b ) 
 		BASE_DIR=$OPTARG
 		;;
 	    n )
@@ -348,7 +347,7 @@ if [ $IS_ROOT_CA ] ; then
 		-sha256					\
 		-extensions v3_ca			\
 		-out $CA_DIR/certs/$CERT_FILENAME	\
-		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/EMAIL=$EMAIL/CN=$CN"
+		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/emailAddress=$EMAIL/CN=$CN"
 	if [ $? != "0" ] ; then
 		echo ">> FATAL: 'openssl req' failed. Wrong passphrase?"
 		exit 1
@@ -373,7 +372,7 @@ else
 		-new					\
 		-sha256					\
 		-out $CA_DIR/csr/$CSR_FILENAME		\
-		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/EMAIL=$EMAIL/CN=$CN"
+		-subj "/C=$COUNTRY/ST=$STATE/L=$LOCALITY/O=$ORGANIZATION/OU=$OU/emailAddress=$EMAIL/CN=$CN"
 	if [ $? != "0" ] ; then
 		echo ">> FATAL: 'openssl req' failed. Wrong passphrase?"
 		exit 1

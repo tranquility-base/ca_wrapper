@@ -2,6 +2,9 @@
 ## Have a CA sign a CSR, and supply a chain file.
 ## 2018-05-04 Started. Dwight Tuinstra.
 
+# Undefined or empty string turns debug printing off, all else turns it on.
+DEBUG="ON"
+
 usage() {
 	echo "Usage: `basename $0` [-i|-s|-u] ca-directory csr_file"
 	echo "    -i : sign an intermediate CA certificate"
@@ -50,13 +53,13 @@ CA_NAME=`basename $CA_DIR`
 CHAIN_PATH=${CA_DIR}/certs/${CA_NAME}-chain.pem
 CFG_PATH=${CA_DIR}/openssl.cnf
 
-: << DEBUG
+if [ -n "$DEBUG" ] ; then
 	echo "CA_DIR:        $CA_DIR"
 	echo "CSR_FILE:      $CSR_FILE"
 	echo "CA_NAME:       $CA_NAME"
 	echo "CHAIN_PATH:    $CHAIN_PATH"
 	echo "CFG_PATH:      $CFG_PATH"
-DEBUG
+fi
 
 ## Is there really a CA at CA_DIR?
 if [ ! -d $CA_DIR ] ; then
@@ -110,7 +113,7 @@ if [ ! $? ] ; then
 	echo ">> FATAL: 'openssl ca' failed. Wong passphrase?"
 	exit 1
 fi
-# echo ">>>>> DEBUG. openssl ca exit status is $?."
+if [ -n "$DEBUG" ] ; then echo ">>>>> DEBUG. openssl ca exit status is $?." ; fi
 echo ">> Signed certificate is in the current directory, named "
 echo ">>     $CERT_FILE."
 
