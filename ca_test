@@ -1,18 +1,20 @@
 #!/bin/sh
 
-CA_PATH=./ca
+CA_PATH=./ca_test
 SCRIPT_PATH=~/workspace/ssl/ca_wrapper
+ROOT_CA_NAME=root-ca
+INT1_CA_NAME=intermediate1-ca
+INT2_CA_NAME=intermediate2-ca
 
 rm -rf $CA_PATH
-rm -f example-root*
-rm -f example-int*
-
+rm -f *pem *csr
 
 # Root
-echo "CREATE ROOT CA"
+echo ">> CREATE ROOT CA"
 $SCRIPT_PATH/ca_create \
+	-r \
 	-b $CA_PATH \
-	-n example-root \
+	-n $ROOT_CA_NAME \
 	-c US \
 	-s "New York" \
 	-l Exampleton \
@@ -21,12 +23,13 @@ $SCRIPT_PATH/ca_create \
 	-e certmonger@example.com \
 	-v ocsp.example.com
 
-# Intermediate
-echo "CREATE INTERMEDIATE CA BELOW ROOT CA"
+if [ "$?" != "0" ] ; then exit 1 ; fi
+
+# Level 1
+echo ">> CREATE LEVEL 1 INTERMEDIATE CA"
 $SCRIPT_PATH/ca_create \
-	-f example-int1.example.edu \
 	-b $CA_PATH \
-	-n example-int1 \
+	-n $INT1_CA_NAME \
 	-c US \
 	-s "New York" \
 	-l Exampleton \
@@ -34,28 +37,35 @@ $SCRIPT_PATH/ca_create \
 	-u "IT Department" \
 	-e certmonger@example.com \
 	-v ocsp.example.com
+if [ "$?" != "0" ] ; then exit 1 ; fi
 
-# Sign
-echo "SIGN INTERMEDIATE CA'S CSR"
-$SCRIPT_PATH/ca_signcsr -i $CA_PATH/example-root example-int1-cert*.csr
+echo ">> SIGN ${INT1_CA_NAME} CSR"
+echo "$SCRIPT_PATH/ca_signcsr -i $CA_PATH/${ROOT_CA_NAME} ${INT1_CA_NAME}*.csr"
+$SCRIPT_PATH/ca_signcsr -i $CA_PATH/${ROOT_CA_NAME} ${INT1_CA_NAME}*.csr
+if [ "$?" != "0" ] ; then exit 1 ; fi
 
-# Install
-echo "INSTALL SIGNED CERT AND NEW CHAIN"
-$SCRIPT_PATH/ca_install_int_cert $CA_PATH/example-int1 example-int1-cert*.pem example-root-chain.pem
+echo ">> INSTALL ${INT1_CA_NAME} CERT AND NEW CHAIN"
+$SCRIPT_PATH/ca_install_int_cert $CA_PATH/$INT1_CA_NAME ${INT1_CA_NAME}*.pem ${ROOT_CA_NAME}-chain.pem
+if [ "$?" != "0" ] ; then exit 1 ; fi
 
-# 2nd Intermediate
-echo "CREATE 2nd INTERMEDIATE CA"
+# Level 2
+echo ">> CREATE LEVEL 2 INTERMEDIATE CA"
 $SCRIPT_PATH/ca_create \
-	-f example-int2.example.edu \
 	-b $CA_PATH \
-	-n example-int2 \
+	-n $INT2_CA_NAME \
 	-c US \
 	-s "New York" \
 	-l Exampleton \
 	-o "Example Industries Inc." \
 	-u "IT Department" \
+	-e certmonger@example.com \
 	-v ocsp.example.com
-echo "SIGN 2nd INTERMEDIATE CSR"
-$SCRIPT_PATH/ca_signcsr -i $CA_PATH/example-int1 example-int2-cert*.csr
-echo "INSTALL CERT and NEW CHAIN IN 2nd INTERMEDIATE"
-$SCRIPT_PATH/ca_install_int_cert $CA_PATH/example-int2 example-int2-cert*.pem example-int1-chain.pem
+if [ "$?" != "0" ] ; then exit 1 ; fi
+
+echo ">> SIGN ${INT2_CA_NAME} CSR"
+$SCRIPT_PATH/ca_signcsr -i $CA_PATH/${INT1_CA_NAME} ${INT2_CA_NAME}*.csr
+if [ "$?" != "0" ] ; then exit 1 ; fi
+
+echo ">> INSTALL ${INT2_CA_NAME} CERT AND NEW CHAIN"
+$SCRIPT_PATH/ca_install_int_cert $CA_PATH/$INT2_CA_NAME ${INT2_CA_NAME}*.pem ${INT1_CA_NAME}-chain.pem
+if [ "$?" != "0" ] ; then exit 1 ; fi
