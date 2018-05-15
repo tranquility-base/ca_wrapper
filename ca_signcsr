@@ -10,9 +10,9 @@ usage() {
 	echo "    -i : sign an intermediate CA certificate"
 	echo "    -s : sign a server certificate (default)"
 	echo "    -u : sign a user/client certificate"
-	echo "  Last occurrence of -s, -u, or -i is used."
 	echo "  Causes the CA at ca-directory to sign the csr."
 	echo "  The csr filename MUST end in '.csr'"
+	echo "  Last occurrence of -s, -u, or -i is used."
 	echo "  The signed cert is placed in the current directory."
 	echo "  Verifying csr info prior to signing is the responsibility of "
 	echo "    the person running this script.  An opportunity to do this "
@@ -127,3 +127,4 @@ else
 	echo ">>     `basename ${CHAIN_PATH}`."
 fi
 
+exit 0

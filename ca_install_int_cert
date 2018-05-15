@@ -51,20 +51,20 @@ fi
 
 ## Check that CERT_DIR exists and is writable.
 if [ ! -d ${CERT_DIR} ] || [ ! -w ${CERT_DIR} ] ; then
-	echo ">> FATAL: $CERT_DIR does not exists or is not writeable."
+	echo ">> FATAL: directory $CERT_DIR does not exists or is not writeable."
 	usage
 	exit 1
 fi
 
 ## Check that CA_CERT file exists and is readable
 if [ ! -r $CA_CERT ] ; then
-	echo ">> FATAL: $CA_CERT does not exist or is not readable."
+	echo ">> FATAL: cert file $CA_CERT does not exist or is not readable."
 	exit 1
 fi
 
 ## Check that CHAIN_FILE file exists and is readable
 if [ ! -r $CHAIN_FILE ] ; then
-	echo ">> FATAL: $CHAIN_FILE does not exist or is not readable."
+	echo ">> FATAL: chain file $CHAIN_FILE does not exist or is not readable."
 	exit 1
 fi
 
@@ -126,3 +126,5 @@ else
 	echo ">> in the current directory, but you can copy it manually. It's at"
 	echo ">>     ${CERT_DIR}/${MY_CHAIN_LINKNAME}."
 fi
+
+exit 0
