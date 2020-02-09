@@ -12,7 +12,7 @@ expired.
 This project was meant as a cost- and hassle-saving means to allow 
 myself and other sysadmins the ability to set up CAs as needed (lots of 
 different environments) and make it easy to manage internal-only certs while
-following naming conventions. Unfortunately was unable to complete and deploy
+following naming conventions. Unfortunately I was unable to complete and deploy
 to production due to other project priorities.
 
 At the time there were other FOSS projects that tackled the same problem but 
